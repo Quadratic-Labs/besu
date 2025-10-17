@@ -24,21 +24,31 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonGetter;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import org.apache.tuweni.bytes.Bytes32;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import org.apache.tuweni.bytes.Bytes;
 
 public class SuffixStateDiffParameter {
 
+  @JsonProperty("suffix")
   private final byte suffix;
-  private final Bytes32 currentValue;
-  private final Bytes32 newValue;
+
+  @JsonProperty("currentValue")
+  @JsonSerialize(using = HexStringSerializer.class)
+  @JsonDeserialize(using = HexStringDeserializer.class)
+  private final Bytes currentValue;
+
+  @JsonProperty("newValue")
+  @JsonSerialize(using = HexStringSerializer.class)
+  @JsonDeserialize(using = HexStringDeserializer.class)
+  private final Bytes newValue;
 
   @JsonCreator
   public SuffixStateDiffParameter(
       @JsonProperty("suffix") final byte suffix,
       @JsonDeserialize(using = HexStringDeserializer.class) @JsonProperty("currentValue")
-          final Bytes32 currentValue,
+          final Bytes currentValue,
       @JsonDeserialize(using = HexStringDeserializer.class) @JsonProperty("newValue")
-          final Bytes32 newValue) {
+          final Bytes newValue) {
     this.suffix = suffix;
     this.currentValue = currentValue;
     this.newValue = newValue;
@@ -76,18 +86,18 @@ public class SuffixStateDiffParameter {
     return "SuffixStateDiff{" + "suffix=" + suffix + ", currentValue=" + currentValue;
   }
 
-  @JsonGetter
+  @JsonGetter("suffix")
   public byte getSuffix() {
     return suffix;
   }
 
-  @JsonGetter
-  public Bytes32 getCurrentValue() {
+  @JsonGetter("currentValue")
+  public Bytes getCurrentValue() {
     return currentValue;
   }
 
-  @JsonGetter
-  public Bytes32 getNewValue() {
+  @JsonGetter("newValue")
+  public Bytes getNewValue() {
     return newValue;
   }
 }

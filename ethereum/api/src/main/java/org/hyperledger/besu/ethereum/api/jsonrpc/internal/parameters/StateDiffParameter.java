@@ -14,37 +14,42 @@
  */
 package org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters;
 
+import org.hyperledger.besu.ethereum.core.json.HexStringDeserializer;
+import org.hyperledger.besu.ethereum.core.json.HexStringSerializer;
 import org.hyperledger.besu.ethereum.core.witness.StateDiff;
 
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonSerialize;
+import com.fasterxml.jackson.annotation.JsonDeserialize;
+
+import org.apache.tuweni.bytes.Bytes;
 
 public class StateDiffParameter {
+  @JsonProperty("stem")
+  @JsonSerialize(using = HexStringSerializer.class)
+  @JsonDeserialize(using = HexStringDeserializer.class)
+  private final Bytes stem;
 
-  final List<StemStateDiffParameter> steamStateDiff;
+  @JsonProperty("suffixDiffs")
+  private final List<SuffixStateDiffParameter> suffixDiffs;
 
   @JsonCreator
-  public StateDiffParameter(final List<StemStateDiffParameter> steamStateDiff) {
-    this.steamStateDiff = steamStateDiff;
+  public StateDiffParameter(
+      @JsonProperty("stem") @JsonDeserialize(using = HexStringDeserializer.class) @JsonProperty("stem") final Bytes stem,
+      @JsonProperty("suffixDiffs") final List<SuffixStateDiffParameter> suffixDiffs) {
+    this.stem = stem;
+    this.suffixDiffs = suffixDiffs;
   }
 
-  public List<StemStateDiffParameter> getSteamStateDiff() {
-    return steamStateDiff;
+  @JsonGetter("stem")
+  public Bytes getStem() {
+    return stem;
   }
 
-  public static StateDiff toStateDiff(final StateDiffParameter stateDiffParameter) {
-    return new StateDiff(
-        StemStateDiffParameter.toListOfStemStateDiff(stateDiffParameter.getSteamStateDiff()));
-  }
-
-  public static StateDiffParameter fromStateDiff(final StateDiff stateDiff) {
-    return new StateDiffParameter(
-        StemStateDiffParameter.fromListOfStemStateDiff(stateDiff.steamStateDiff()));
-  }
-
-  @Override
-  public String toString() {
-    return "StateDiffParameter{" + "steamStateDiff=" + steamStateDiff + '}';
+  @JsonGetter("suffixDiffs")
+  public List<SuffixStateDiffParameter> getSuffixDiffs() {
+    return suffixDiffs;
   }
 }

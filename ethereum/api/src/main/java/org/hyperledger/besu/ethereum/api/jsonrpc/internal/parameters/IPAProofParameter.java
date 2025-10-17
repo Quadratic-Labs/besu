@@ -26,15 +26,27 @@ import org.apache.tuweni.bytes.Bytes32;
 
 public class IPAProofParameter {
   static final int IPA_PROOF_DEPTH = 8;
-  private final List<String> cl;
-  private final List<String> cr;
+
+  @JsonProperty("cl")
+  @JsonSerialize(using = ListHexString32Serializer.class)
+  @JsonDeserialize(using = ListHexString32Deserializer.class)
+  private final List<Bytes32> cl;
+
+  @JsonProperty("cr")
+  @JsonSerialize(using = ListHexString32Serializer.class)
+  @JsonDeserialize(using = ListHexString32Deserializer.class)
+  private final List<Bytes32> cr;
+
+  @JsonProperty("finalEvaluation")
+  @JsonSerialize(using = HexString32Serializer.class)
+  @JsonDeserialize(using = HexString32Deserializer.class)
   private final Bytes32 finalEvaluation;
 
   @JsonCreator
   public IPAProofParameter(
-      @JsonProperty("cl") final List<String> cl,
-      @JsonProperty("cr") final List<String> cr,
-      @JsonDeserialize(using = HexStringDeserializer.class) @JsonProperty("finalEvaluation")
+      @JsonProperty("cl") @JsonDeserialize(using = ListHexString32Deserializer.class) final List<String> cl,
+      @JsonProperty("cr") @JsonDeserialize(using = ListHexString32Deserializer.class) final List<String> cr,
+      @JsonDeserialize(using = HexString32Deserializer.class) @JsonProperty("finalEvaluation")
           final Bytes32 finalEvaluation) {
     if (cl.size() != IPA_PROOF_DEPTH || cr.size() != IPA_PROOF_DEPTH) {
       throw new IllegalArgumentException("cl and cr must have a length of " + IPA_PROOF_DEPTH);
@@ -70,14 +82,17 @@ public class IPAProofParameter {
         + '}';
   }
 
-  public List<String> getCl() {
+  @JsonGetter("cl")
+  public List<Bytes32> getCl() {
     return cl;
   }
 
-  public List<String> getCr() {
+  @JsonGetter("cr")
+  public List<Bytes32> getCr() {
     return cr;
   }
 
+  @JsonGetter("finalEvaluation")
   public Bytes32 getFinalEvaluation() {
     return finalEvaluation;
   }

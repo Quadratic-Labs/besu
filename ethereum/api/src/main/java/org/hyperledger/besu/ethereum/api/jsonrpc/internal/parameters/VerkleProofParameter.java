@@ -14,7 +14,12 @@
  */
 package org.hyperledger.besu.ethereum.api.jsonrpc.internal.parameters;
 
+import org.hyperledger.besu.ethereum.core.json.ListHexString32Deserializer;
+import org.hyperledger.besu.ethereum.core.json.ListHexString32Serializer;
 import org.hyperledger.besu.ethereum.core.json.HexStringDeserializer;
+import org.hyperledger.besu.ethereum.core.json.HexStringSerializer;
+import org.hyperledger.besu.ethereum.core.json.HexString32Deserializer;
+import org.hyperledger.besu.ethereum.core.json.HexString32Serializer;
 import org.hyperledger.besu.ethereum.core.witness.VerkleProof;
 
 import java.util.List;
@@ -23,25 +28,42 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonGetter;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.bytes.Bytes32;
 
 public class VerkleProofParameter {
   // TODO Maybe create a Bytes31 in Tuweni for stems?
 
-  final List<String> otherStems;
+  @JsonProperty("otherStems")
+  @JsonDeserialize(ListHexStringDeserializer.class)
+  @JsonSerialize(ListHexStringSerializer.class)
+  private final List<Bytes> otherStems;
+
+  @JsonProperty("depthExtensionPresent")
+  @JsonDeserialize(HexStringDeserializer.class)
+  @JsonSerialize(HexStringSerializer.class)
   private final Bytes depthExtensionPresent;
-  private final List<String> commitmentsByPath;
+
+  @JsonProperty("commitmentsByPath")
+  @JsonDeserialize(ListHexString32Deserializer.class)
+  @JsonSerialize(ListHexString32Serializer.class)
+  private final List<Bytes32> commitmentsByPath;
+
+  @JsonProperty("d")
+  @JsonDeserialize(HexString32Deserializer.class)
+  @JsonSerialize(HexString32Serializer.class)
   private final Bytes32 d;
+
+  @JsonProperty("ipaProof")
   private final IPAProofParameter ipaProof;
 
   @JsonCreator
   public VerkleProofParameter(
-      @JsonProperty("otherStems") final List<String> otherStems,
-      @JsonDeserialize(using = HexStringDeserializer.class) @JsonProperty("depthExtensionPresent")
-          final Bytes depthExtensionPresent,
-      @JsonProperty("commitmentsByPath") final List<String> commitmentsByPath,
-      @JsonDeserialize(using = HexStringDeserializer.class) @JsonProperty("d") final Bytes32 d,
+      @JsonProperty("otherStems") @JsonDeserialize(ListHexStringDeserializer.class) final List<String> otherStems,
+      @JsonProperty("depthExtensionPresent") @JsonDeserialize(using = HexStringDeserializer.class) final Bytes depthExtensionPresent,
+      @JsonProperty("commitmentsByPath") @JsonDeserialize(ListHexString32Deserializer.class) final List<String> commitmentsByPath,
+      @JsonProperty("d") @JsonDeserialize(using = HexString32Deserializer.class) final Bytes32 d,
       @JsonProperty("ipaProof") final IPAProofParameter ipaProof) {
     this.otherStems = otherStems;
     this.depthExtensionPresent = depthExtensionPresent;
@@ -68,27 +90,27 @@ public class VerkleProofParameter {
         IPAProofParameter.toIPAProof(verkleProofParameter.getIpaProof()));
   }
 
-  @JsonGetter
-  public List<String> getOtherStems() {
+  @JsonGetter("otherStems")
+  public List<Bytes> getOtherStems() {
     return otherStems;
   }
 
-  @JsonGetter
+  @JsonGetter("depthExtensionPresent")
   public Bytes getDepthExtensionPresent() {
     return depthExtensionPresent;
   }
 
-  @JsonGetter
-  public List<String> getCommitmentsByPath() {
+  @JsonGetter("commitmentsByPath")
+  public List<Bytes32> getCommitmentsByPath() {
     return commitmentsByPath;
   }
 
-  @JsonGetter
+  @JsonGetter("d")
   public Bytes32 getD() {
     return d;
   }
 
-  @JsonGetter
+  @JsonGetter("ipaProof")
   public IPAProofParameter getIpaProof() {
     return ipaProof;
   }
