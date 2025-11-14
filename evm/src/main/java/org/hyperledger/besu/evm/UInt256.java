@@ -19,6 +19,10 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 import com.google.common.annotations.VisibleForTesting;
+import jdk.incubator.vector.LongVector;
+import jdk.incubator.vector.VectorMask;
+import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorSpecies;
 
 /**
  * 256-bits wide unsigned integer class.
@@ -495,6 +499,38 @@ public final class UInt256 {
     return lhs;
   }
 
+  // ============================================================================
+  // SIMD Addition Support
+  // ============================================================================
+  //
+  // This section implements SIMD-accelerated 256-bit unsigned integer addition
+  // using the JDK Vector API (jdk.incubator.vector). The implementation treats
+  // 8 x 32-bit limbs as 4 x 64-bit lanes for hardware-accelerated parallel
+  // addition.
+  //
+  // Hardware Requirements:
+  // - x86-64 with AVX2 (256-bit SIMD) - widely available since 2013
+  // - ARM with NEON/SVE (alternative vector instruction sets)
+  //
+  // Performance Benefits:
+  // - 4 additions execute in parallel (SIMD lanes)
+  // - Reduced pipeline stalls from data dependencies
+  // - Efficient carry propagation via lookup table
+  // - JIT compiler generates native SIMD instructions (e.g., vpaddd, vpaddq)
+  //
+  // Algorithm Overview:
+  // 1. Load operands into 256-bit vectors (4 x 64-bit lanes)
+  // 2. Parallel addition across all lanes simultaneously
+  // 3. Detect per-lane carries using unsigned comparison (result < operand)
+  // 4. Detect cascade conditions (lanes with all 1s propagate carries)
+  // 5. Calculate cross-lane carry propagation (scalar operations)
+  // 6. Apply cascaded carries via lookup table
+  // 7. Return result with overflow flag
+  //
+  // Based on the reference implementation from .NET Runtime:
+  // https://github.com/dotnet/runtime/blob/main/src/libraries/System.Runtime.Numerics/src/System/UInt256.cs
+  // ============================================================================
+
   // Lookup table for SIMD carry propagation
   // Each entry represents carry values for 4 lanes based on cascade pattern (16 entries x 32 bytes)
   private static final byte[] BROADCAST_LOOKUP = {
@@ -580,10 +616,12 @@ public final class UInt256 {
   };
 
   /**
-   * SIMD-accelerated addition of two UInt256 values.
+   * SIMD-accelerated addition of two UInt256 values using JDK Vector API.
    *
-   * <p>This implementation uses a SIMD-like approach by treating the 8 x 32-bit limbs as 4 x 64-bit
-   * lanes, performing parallel addition, and handling carry propagation across lanes.
+   * <p>This implementation uses the JDK Vector API with 256-bit vectors (4 x 64-bit lanes) to
+   * perform hardware-accelerated parallel addition with carry propagation across lanes.
+   *
+   * <p>Requires: --add-modules jdk.incubator.vector
    *
    * @param a First UInt256 operand
    * @param b Second UInt256 operand
@@ -591,59 +629,49 @@ public final class UInt256 {
    */
   @VisibleForTesting
   static UInt256Result addSIMD(final UInt256 a, final UInt256 b) {
-    // Convert 8 x 32-bit limbs to 4 x 64-bit values for SIMD-like processing
-    long[] av = new long[4];
-    long[] bv = new long[4];
-    long[] result = new long[4];
+    // Vector species for 256-bit vectors with 4 x 64-bit lanes
+    VectorSpecies<Long> SPECIES = LongVector.SPECIES_256;
+
+    // Convert 8 x 32-bit limbs to 4 x 64-bit values
+    long[] aLongs = new long[4];
+    long[] bLongs = new long[4];
 
     // Pack pairs of 32-bit ints into 64-bit longs (little-endian)
     for (int i = 0; i < 4; i++) {
-      av[i] = (a.limbs[i * 2] & MASK_L) | ((a.limbs[i * 2 + 1] & MASK_L) << 32);
-      bv[i] = (b.limbs[i * 2] & MASK_L) | ((b.limbs[i * 2 + 1] & MASK_L) << 32);
+      aLongs[i] = (a.limbs[i * 2] & MASK_L) | ((a.limbs[i * 2 + 1] & MASK_L) << 32);
+      bLongs[i] = (b.limbs[i * 2] & MASK_L) | ((b.limbs[i * 2 + 1] & MASK_L) << 32);
     }
 
-    // Step 1: Parallel addition (all lanes simultaneously)
-    for (int i = 0; i < 4; i++) {
-      result[i] = av[i] + bv[i];
-    }
+    // Step 1: Load operands into SIMD vectors
+    LongVector av = LongVector.fromArray(SPECIES, aLongs, 0);
+    LongVector bv = LongVector.fromArray(SPECIES, bLongs, 0);
 
-    // Step 2: Detect carries (where overflow occurred in each lane)
-    long[] vCarry = new long[4];
-    for (int i = 0; i < 4; i++) {
-      // If result < a, then overflow occurred (unsigned comparison)
-      // In Java, we use Long.compareUnsigned for this
-      vCarry[i] = Long.compareUnsigned(result[i], av[i]) < 0 ? 0xFFFFFFFFFFFFFFFFL : 0L;
-    }
+    // Step 2: Parallel addition (all 4 lanes simultaneously via SIMD)
+    LongVector result = av.add(bv);
 
-    // Step 3: Extract carry bits to scalar (high bit of each lane)
-    int carry = 0;
-    for (int i = 0; i < 4; i++) {
-      if (vCarry[i] != 0) {
-        carry |= (1 << i);
-      }
-    }
+    // Step 3: Detect carries (overflow in each lane)
+    // If result < a (unsigned), then overflow occurred
+    VectorMask<Long> carryMask = result.compare(VectorOperators.ULT, av);
 
     // Step 4: Detect cascade conditions (lanes that are all 1s will cascade)
-    long[] vCascade = new long[4];
-    int cascade = 0;
-    for (int i = 0; i < 4; i++) {
-      vCascade[i] = (result[i] == 0xFFFFFFFFFFFFFFFFL) ? 0xFFFFFFFFFFFFFFFFL : 0L;
-      if (vCascade[i] != 0) {
-        cascade |= (1 << i);
-      }
-    }
+    LongVector allOnes = LongVector.broadcast(SPECIES, -1L); // 0xFFFFFFFFFFFFFFFF
+    VectorMask<Long> cascadeMask = result.compare(VectorOperators.EQ, allOnes);
 
-    // Step 5: Calculate cross-lane carries
+    // Step 5: Extract masks to scalar for carry propagation calculations
+    int carry = maskToInt(carryMask);
+    int cascade = maskToInt(cascadeMask);
+
+    // Step 6: Calculate cross-lane carries using scalar operations
     carry = cascade + 2 * carry; // Shift carries left and combine
     cascade ^= carry; // Remove cascades not affected
     cascade &= 0x0f; // Keep only 4 lane bits
 
-    // Step 6: Lookup carry broadcast values
+    // Step 7: Lookup carry broadcast values
     // Each entry in the lookup table is 32 bytes (4 x 64-bit values)
     int lookupOffset = cascade * 32;
     long[] cascadedCarries = new long[4];
     for (int i = 0; i < 4; i++) {
-      // Read 8 bytes from lookup table for each long
+      // Read 8 bytes from lookup table for each long (little-endian)
       long value = 0;
       for (int j = 0; j < 8; j++) {
         value |= ((long) (BROADCAST_LOOKUP[lookupOffset + i * 8 + j] & 0xFF)) << (j * 8);
@@ -651,22 +679,43 @@ public final class UInt256 {
       cascadedCarries[i] = value;
     }
 
-    // Step 7: Apply cascaded carries
-    for (int i = 0; i < 4; i++) {
-      result[i] += cascadedCarries[i];
-    }
+    // Step 8: Apply cascaded carries using SIMD addition
+    LongVector carryVector = LongVector.fromArray(SPECIES, cascadedCarries, 0);
+    result = result.add(carryVector);
 
-    // Step 8: Unpack result from 4 x 64-bit back to 8 x 32-bit limbs
+    // Step 9: Extract result from vector to array
+    long[] resultLongs = new long[4];
+    result.intoArray(resultLongs, 0);
+
+    // Step 10: Unpack result from 4 x 64-bit back to 8 x 32-bit limbs
     int[] resultLimbs = new int[N_LIMBS];
     for (int i = 0; i < 4; i++) {
-      resultLimbs[i * 2] = (int) result[i];
-      resultLimbs[i * 2 + 1] = (int) (result[i] >>> 32);
+      resultLimbs[i * 2] = (int) resultLongs[i];
+      resultLimbs[i * 2 + 1] = (int) (resultLongs[i] >>> 32);
     }
 
-    // Step 9: Check for overall overflow
+    // Step 11: Check for overall overflow
     boolean overflow = (carry & 0b1_0000) != 0;
 
     return new UInt256Result(new UInt256(resultLimbs), overflow);
+  }
+
+  /**
+   * Convert a VectorMask to an integer bitmask.
+   *
+   * <p>Each bit represents whether the corresponding lane's mask is true.
+   *
+   * @param mask The vector mask to convert
+   * @return Integer bitmask where bit i is set if lane i's mask is true
+   */
+  private static int maskToInt(final VectorMask<Long> mask) {
+    int result = 0;
+    for (int i = 0; i < 4; i++) {
+      if (mask.laneIsSet(i)) {
+        result |= (1 << i);
+      }
+    }
+    return result;
   }
 
   /**
