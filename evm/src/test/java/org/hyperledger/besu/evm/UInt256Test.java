@@ -367,4 +367,185 @@ public class UInt256Test {
       assertThat(remainder).isEqualTo(expected);
     }
   }
+
+  @Test
+  public void addSIMD_simpleAddition() {
+    // Test: 5 + 3 = 8
+    UInt256 a = UInt256.fromInt(5);
+    UInt256 b = UInt256.fromInt(3);
+    UInt256.UInt256Result result = UInt256.addSIMD(a, b);
+
+    assertThat(result.value.intValue()).isEqualTo(8);
+    assertThat(result.overflow).isFalse();
+  }
+
+  @Test
+  public void addSIMD_zeroAddition() {
+    // Test: 0 + 0 = 0
+    UInt256 a = UInt256.ZERO;
+    UInt256 b = UInt256.ZERO;
+    UInt256.UInt256Result result = UInt256.addSIMD(a, b);
+
+    assertThat(result.value.isZero()).isTrue();
+    assertThat(result.overflow).isFalse();
+  }
+
+  @Test
+  public void addSIMD_largeNumbers() {
+    // Test addition of large numbers
+    byte[] aBytes =
+        new byte[] {
+          0x12, 0x34, 0x56, 0x78, (byte) 0x9A, (byte) 0xBC, (byte) 0xDE, (byte) 0xF0,
+          0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, (byte) 0x88,
+          (byte) 0x99, (byte) 0xAA, (byte) 0xBB, (byte) 0xCC, (byte) 0xDD, (byte) 0xEE,
+              (byte) 0xFF, 0x00,
+          0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
+        };
+    byte[] bBytes =
+        new byte[] {
+          0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+          (byte) 0x88, (byte) 0x99, (byte) 0xAA, (byte) 0xBB, (byte) 0xCC, (byte) 0xDD,
+              (byte) 0xEE, (byte) 0xFF,
+          0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+          (byte) 0x88, (byte) 0x99, (byte) 0xAA, (byte) 0xBB, (byte) 0xCC, (byte) 0xDD,
+              (byte) 0xEE, (byte) 0xFF
+        };
+
+    UInt256 a = UInt256.fromBytesBE(aBytes);
+    UInt256 b = UInt256.fromBytesBE(bBytes);
+    UInt256.UInt256Result result = UInt256.addSIMD(a, b);
+
+    // Verify using BigInteger
+    BigInteger aBig = new BigInteger(1, aBytes);
+    BigInteger bBig = new BigInteger(1, bBytes);
+    BigInteger expectedBig = aBig.add(bBig);
+
+    assertThat(result.value.toBigInteger()).isEqualTo(expectedBig);
+    assertThat(result.overflow).isFalse();
+  }
+
+  @Test
+  public void addSIMD_withCarry() {
+    // Test addition that causes carry between lanes
+    // Set up a value that will overflow in the lowest 64-bit lane
+    byte[] aBytes = new byte[32];
+    byte[] bBytes = new byte[32];
+
+    // Set lowest 8 bytes to maximum value (will cause carry)
+    for (int i = 24; i < 32; i++) {
+      aBytes[i] = (byte) 0xFF;
+      bBytes[i] = 0x01;
+    }
+
+    UInt256 a = UInt256.fromBytesBE(aBytes);
+    UInt256 b = UInt256.fromBytesBE(bBytes);
+    UInt256.UInt256Result result = UInt256.addSIMD(a, b);
+
+    BigInteger aBig = new BigInteger(1, aBytes);
+    BigInteger bBig = new BigInteger(1, bBytes);
+    BigInteger expectedBig = aBig.add(bBig);
+
+    assertThat(result.value.toBigInteger()).isEqualTo(expectedBig);
+    assertThat(result.overflow).isFalse();
+  }
+
+  @Test
+  public void addSIMD_cascadeCarry() {
+    // Test cascade condition: when a lane is all 1s, adding a carry cascades
+    byte[] aBytes = new byte[32];
+    // Set first lane to all 1s
+    for (int i = 24; i < 32; i++) {
+      aBytes[i] = (byte) 0xFF;
+    }
+
+    UInt256 a = UInt256.fromBytesBE(aBytes);
+    UInt256 b = UInt256.fromInt(1);
+    UInt256.UInt256Result result = UInt256.addSIMD(a, b);
+
+    // Expected: 0x0000000000000000 0000000000000001 0000000000000000
+    BigInteger expected = BigInteger.ONE.shiftLeft(64);
+    assertThat(result.value.toBigInteger()).isEqualTo(expected);
+    assertThat(result.overflow).isFalse();
+  }
+
+  @Test
+  public void addSIMD_maxValue() {
+    // Test adding 1 to max value (should overflow)
+    byte[] maxBytes = new byte[32];
+    Arrays.fill(maxBytes, (byte) 0xFF);
+
+    UInt256 maxVal = UInt256.fromBytesBE(maxBytes);
+    UInt256 one = UInt256.fromInt(1);
+    UInt256.UInt256Result result = UInt256.addSIMD(maxVal, one);
+
+    // Result should wrap to 0 with overflow flag set
+    assertThat(result.value.isZero()).isTrue();
+    assertThat(result.overflow).isTrue();
+  }
+
+  @Test
+  public void addSIMD_noOverflow() {
+    // Test max value + 0 (no overflow)
+    byte[] maxBytes = new byte[32];
+    Arrays.fill(maxBytes, (byte) 0xFF);
+
+    UInt256 maxVal = UInt256.fromBytesBE(maxBytes);
+    UInt256 zero = UInt256.ZERO;
+    UInt256.UInt256Result result = UInt256.addSIMD(maxVal, zero);
+
+    assertThat(result.value).isEqualTo(maxVal);
+    assertThat(result.overflow).isFalse();
+  }
+
+  @Test
+  public void addSIMD_randomValues() {
+    // Test with random values and verify against BigInteger
+    final Random random = new Random(54321);
+    for (int i = 0; i < SAMPLE_SIZE; i++) {
+      final byte[] aArray = new byte[32];
+      final byte[] bArray = new byte[32];
+      random.nextBytes(aArray);
+      random.nextBytes(bArray);
+
+      UInt256 a = UInt256.fromBytesBE(aArray);
+      UInt256 b = UInt256.fromBytesBE(bArray);
+      UInt256.UInt256Result result = UInt256.addSIMD(a, b);
+
+      BigInteger aBig = new BigInteger(1, aArray);
+      BigInteger bBig = new BigInteger(1, bArray);
+      BigInteger sum = aBig.add(bBig);
+
+      // Check if overflow should occur
+      BigInteger maxUInt256 = BigInteger.ONE.shiftLeft(256);
+      boolean shouldOverflow = sum.compareTo(maxUInt256) >= 0;
+
+      if (shouldOverflow) {
+        BigInteger expectedValue = sum.mod(maxUInt256);
+        assertThat(result.value.toBigInteger()).isEqualTo(expectedValue);
+        assertThat(result.overflow).isTrue();
+      } else {
+        assertThat(result.value.toBigInteger()).isEqualTo(sum);
+        assertThat(result.overflow).isFalse();
+      }
+    }
+  }
+
+  @Test
+  public void addSIMD_multipleCascades() {
+    // Test multiple cascading carries across lanes
+    byte[] aBytes = new byte[32];
+    // Set lowest 16 bytes (2 lanes) to all 1s
+    for (int i = 16; i < 32; i++) {
+      aBytes[i] = (byte) 0xFF;
+    }
+
+    UInt256 a = UInt256.fromBytesBE(aBytes);
+    UInt256 b = UInt256.fromInt(1);
+    UInt256.UInt256Result result = UInt256.addSIMD(a, b);
+
+    // Expected: carry should propagate through 2 lanes
+    BigInteger expected = BigInteger.ONE.shiftLeft(128);
+    assertThat(result.value.toBigInteger()).isEqualTo(expected);
+    assertThat(result.overflow).isFalse();
+  }
 }
